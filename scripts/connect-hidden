@@ -1,0 +1,93 @@
+#!/bin/bash
+# Add or update a hidden Wi-Fi profile and activate it.
+# argv: ssid security   stdin: passphrase (ignored when security is open)
+# The passphrase is never placed on a command line.
+
+set -euo pipefail
+
+if [[ $# -ne 2 ]]; then
+  echo "expected ssid and security" >&2
+  exit 4
+fi
+
+ssid=$1
+security=$2
+IFS= read -r pw || true
+
+case "$security" in
+  open|wpa-psk|sae) ;;
+  *)
+    echo "invalid security" >&2
+    exit 4
+    ;;
+esac
+
+if [[ -z $ssid || $ssid == *$'\n'* || $ssid == *$'\t'* || $ssid == *$'\r'* ]]; then
+  echo "invalid ssid" >&2
+  exit 4
+fi
+
+if [[ $security != open ]]; then
+  if [[ ${#pw} -lt 8 || ${#pw} -gt 64 || $pw == *$'\n'* || $pw == *$'\r'* ]]; then
+    echo "invalid passphrase" >&2
+    exit 4
+  fi
+fi
+
+iface=$(nmcli -t -f DEVICE,TYPE,STATE device status | awk -F: '$2=="wifi" && $3=="connected" { print $1; exit }')
+if [[ -z ${iface:-} ]]; then
+  iface=$(nmcli -t -f DEVICE,TYPE device status | awk -F: '$2=="wifi" { print $1; exit }')
+fi
+if [[ -z ${iface:-} ]]; then
+  exit 3
+fi
+
+uuid=""
+while IFS=: read -r id type; do
+  [[ ${type:-} == 802-11-wireless ]] || continue
+  [[ -n ${id:-} ]] || continue
+  current=$(nmcli -g 802-11-wireless.ssid connection show uuid "$id" 2>/dev/null || true)
+  if [[ $current == "$ssid" ]]; then
+    uuid=$id
+    break
+  fi
+done < <(nmcli -t -f UUID,TYPE connection show)
+
+km_args=()
+if [[ $security == wpa-psk ]]; then
+  km_args=(wifi-sec.key-mgmt wpa-psk)
+elif [[ $security == sae ]]; then
+  km_args=(wifi-sec.key-mgmt sae wifi-sec.pmf 3)
+fi
+
+if [[ -z $uuid ]]; then
+  uuid=$(uuidgen)
+  if ! nmcli connection add type wifi ifname "$iface" con-name "$ssid" ssid "$ssid" \
+    connection.uuid "$uuid" connection.autoconnect no wifi.hidden yes "${km_args[@]}" >/dev/null; then
+    nmcli connection add type wifi ifname "$iface" con-name "$ssid ${uuid:0:8}" ssid "$ssid" \
+      connection.uuid "$uuid" connection.autoconnect no wifi.hidden yes "${km_args[@]}" >/dev/null
+  fi
+else
+  nmcli connection modify uuid "$uuid" \
+    connection.interface-name "$iface" \
+    connection.autoconnect no \
+    802-11-wireless.ssid "$ssid" \
+    802-11-wireless.hidden yes >/dev/null
+  if [[ $security == open ]]; then
+    nmcli connection modify uuid "$uuid" remove 802-11-wireless-security >/dev/null 2>&1 || true
+  else
+    nmcli connection modify uuid "$uuid" "${km_args[@]}" >/dev/null
+  fi
+fi
+
+if [[ $security != open ]]; then
+  # nmcli's editor treats quotes and backslashes as syntax. Escape those so
+  # the passphrase is data, then pass it on stdin.
+  escaped=$(printf '%s' "$pw" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  printf 'set wifi-sec.psk "%s"\nsave\nquit\n' "$escaped" | timeout 15s nmcli connection edit uuid "$uuid" >/dev/null
+  unset escaped
+fi
+unset pw
+
+timeout 25s nmcli connection up uuid "$uuid" ifname "$iface"
+nmcli connection modify uuid "$uuid" connection.autoconnect yes >/dev/null

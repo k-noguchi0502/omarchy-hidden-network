@@ -1,0 +1,1494 @@
+diff --git c/Backend.qml w/Backend.qml
+index 8895670..65a95ee 100644
+--- c/Backend.qml
++++ w/Backend.qml
+@@ -25,6 +25,12 @@ Item {
+   property var summon: null
+ 
+   property var config: Schema.withConfigDefaults(null)
++  property var catalog: ({})
++  onCatalogChanged: {
++    RootSearch.setCatalog(backend.catalog)
++    Calculator.setCatalog(backend.catalog)
++    if (rebuildTimer) rebuildTimer.restart()
++  }
+   property bool directoriesReady: false
+   readonly property bool ready: directoriesReady && settingsStore.loaded && frecencyStore.loaded && calculatorStore.loaded
+ 
+@@ -90,6 +96,8 @@ Item {
+   }
+ 
+   function rebuildCandidates() {
++    RootSearch.setCatalog(backend.catalog)
++    Calculator.setCatalog(backend.catalog)
+     var next = []
+     var apps = backend.appEntries()
+     for (var i = 0; i < apps.length; i++) if (apps[i] && apps[i].id) next.push(RootSearch.appCandidate(apps[i]))
+@@ -171,7 +179,7 @@ Item {
+       case "copy-answer":
+         if (!historyId) backend.saveCalculation(entry)
+         clipboard.copy(entry.copy)
+-        return { close: true, hud: "Copied to Clipboard" }
++        return { close: true, hud: RootSearch.t("toast.copied", "Copied to Clipboard") }
+       case "paste-answer":
+         if (!historyId) backend.saveCalculation(entry)
+         // Copies, waits for our window to unmap, then pastes.
+@@ -180,17 +188,17 @@ Item {
+       case "copy-question-answer":
+         if (!historyId) backend.saveCalculation(entry)
+         clipboard.copy(entry.query + " = " + entry.result)
+-        return { close: true, hud: "Copied to Clipboard" }
++        return { close: true, hud: RootSearch.t("toast.copied", "Copied to Clipboard") }
+       case "open-history":
+-        return { push: { kind: "calculator-history", title: "Calculator History" } }
++        return { push: { kind: "calculator-history", title: RootSearch.t("builtin.calcHistory", "Calculator History") } }
+       case "delete-entry":
+         calculatorStore.update(function(doc) { doc.history = doc.history.filter(function(h) { return h.id !== historyId }) })
+         backend.emit("calculator.historyStateChanged", null)
+-        return { toast: { style: "success", title: "Entry deleted" } }
++        return { toast: { style: "success", title: RootSearch.t("toast.entryDeleted", "Entry deleted") } }
+       case "delete-all-entries":
+         calculatorStore.update(function(doc) { doc.history = [] })
+         backend.emit("calculator.historyStateChanged", null)
+-        return { toast: { style: "success", title: "History cleared" } }
++        return { toast: { style: "success", title: RootSearch.t("toast.historyCleared", "History cleared") } }
+     }
+     throw new Error("Unknown action " + action)
+   }
+@@ -270,7 +278,7 @@ Item {
+           appFocuser.open(candidate)
+           return { close: true }
+         case "omarchy-action":
+-          if (candidate.disabled) return { toast: { style: "failure", title: candidate.title + " is already set up" } }
++          if (candidate.disabled) return { toast: { style: "failure", title: RootSearch.tf("toast.already", "%1 is already set up", candidate.title) } }
+           backend.recordVisit(id, query)
+           backend.runShell(candidate.action)
+           return { close: true }
+@@ -280,19 +288,26 @@ Item {
+         case "omarchy-link":
+           backend.recordVisit(id, query)
+           var target = menuSource.tree.items[candidate.target]
+-          if (!target) return { toast: { style: "failure", title: "Menu " + candidate.target + " not found" } }
++          if (!target) return { toast: { style: "failure", title: RootSearch.tf("toast.menuMissing", "Menu %1 not found", candidate.target) } }
+           return backend.openMenu(target)
+         case "builtin":
+           if (candidate.run.url) {
+             var values = (data && data.arguments) || {}
+             var missing = RootSearch.missingArgument(candidate.arguments, values)
+-            if (missing >= 0) throw new Error("Type a " + candidate.arguments[missing].placeholder.toLowerCase() + " first")
++            if (missing >= 0) {
++              var placeholder = candidate.arguments[missing].placeholder
++              if (RootSearch.t("date.style", "en") !== "ja") placeholder = String(placeholder).toLowerCase()
++              throw new Error(RootSearch.tf("error.needArg", "Type a %1 first", placeholder))
++            }
+             backend.recordVisit(id, query)
+             Util.execArgv(["omarchy-launch-browser", RootSearch.fillArguments(candidate.run.url, values)])
+             return { close: true }
+           }
+           backend.recordVisit(id, query)
+-          if (candidate.run.push) return { push: candidate.run.push }
++          if (candidate.run.push) {
++            var push = candidate.run.push
++            return { push: { kind: push.kind, menuId: push.menuId, title: RootSearch.t(push.titleKey, push.title), value: push.value } }
++          }
+           if (candidate.run.summon) backend.summonPlugin(candidate.run.summon, candidate.run.payload || "{}")
+           return { close: true }
+         case "fallback":
+@@ -313,7 +328,7 @@ Item {
+       case "copy-command":
+       case "copy-id":
+         clipboard.copy(action === "copy-id" ? candidate.appId + ".desktop" : candidate.action)
+-        return { close: true, hud: "Copied to Clipboard" }
++        return { close: true, hud: RootSearch.t("toast.copied", "Copied to Clipboard") }
+       case "favorite-add":
+       case "favorite-remove":
+       case "favorite-up":
+@@ -328,21 +343,26 @@ Item {
+             else doc.commands[key] = entry
+           }
+         })
+-        var titles = { "favorite-add": "Added to Favorites", "favorite-remove": "Removed from Favorites", "favorite-up": "Moved Up", "favorite-down": "Moved Down" }
++        var titles = {
++          "favorite-add": RootSearch.t("toast.favAdd", "Added to Favorites"),
++          "favorite-remove": RootSearch.t("toast.favRemove", "Removed from Favorites"),
++          "favorite-up": RootSearch.t("toast.favUp", "Moved Up"),
++          "favorite-down": RootSearch.t("toast.favDown", "Moved Down")
++        }
+         return { toast: { style: "success", title: titles[action] } }
+       case "set-alias":
+-        return { push: { kind: "alias", commandId: id, title: "Alias for " + candidate.title, value: candidate.alias } }
++        return { push: { kind: "alias", commandId: id, title: RootSearch.tf("alias.for", "Alias for %1", candidate.title), value: candidate.alias } }
+       case "remove-alias":
+         backend.updateCommand(id, function(s) { delete s.alias; return s })
+-        return { toast: { style: "success", title: "Alias removed" } }
++        return { toast: { style: "success", title: RootSearch.t("toast.aliasRemoved", "Alias removed") } }
+       case "reset-ranking":
+         frecencyStore.update(function(doc) { delete doc.items[id] })
+-        return { toast: { style: "success", title: "Ranking reset" } }
++        return { toast: { style: "success", title: RootSearch.t("toast.rankingReset", "Ranking reset") } }
+       case "disable":
+         backend.updateCommand(id, function(s) { s.enabled = false; return s })
+         // Undo on Ctrl+T: there is no settings window to re-enable it yet.
+-        return { toast: { style: "success", title: candidate.title + " disabled", actions: [
+-          { id: "undo", title: "Undo", done: candidate.title + " enabled",
++        return { toast: { style: "success", title: RootSearch.tf("toast.disabled", "%1 disabled", candidate.title), actions: [
++          { id: "undo", title: RootSearch.t("toast.undo", "Undo"), done: RootSearch.tf("toast.enabled", "%1 enabled", candidate.title),
+             call: { method: "settings.updateCommandSettings", data: { commandId: id, enabled: true } } }
+         ] } }
+     }
+@@ -405,10 +425,10 @@ Item {
+         if (!backend.candidatesById[id]) throw new Error("Unknown command " + id)
+         if (data.alias !== undefined && data.alias !== null) {
+           var alias = String(data.alias).trim().toLowerCase()
+-          if (/\s/.test(alias)) throw new Error("An alias cannot contain spaces")
++          if (/\s/.test(alias)) throw new Error(RootSearch.t("error.aliasSpaces", "An alias cannot contain spaces"))
+           var commands = settingsStore.doc.commands
+           for (var other in commands) {
+-            if (other !== id && commands[other].alias === alias && alias) throw new Error("Alias “" + alias + "” is already used by " + ((backend.candidatesById[other] || {}).title || other))
++            if (other !== id && commands[other].alias === alias && alias) throw new Error(RootSearch.tf("error.aliasUsed", "Alias “%1” is already used by %2", alias, (backend.candidatesById[other] || {}).title || other))
+           }
+         }
+         backend.updateCommand(id, function(s) {
+@@ -446,7 +466,7 @@ Item {
+         if (!candidate) {
+           var fallback = RootSearch.FALLBACKS.filter(function(f) { return f.id === data.id })[0]
+           if (!fallback) throw new Error("Unknown command " + (data && data.id))
+-          return RootSearch.actionsFor({ kind: "fallback", title: fallback.title })
++          return RootSearch.actionsFor({ kind: "fallback", title: RootSearch.t(fallback.titleKey, fallback.title) })
+         }
+         return RootSearch.actionsFor(candidate)
+       },
+@@ -465,7 +485,7 @@ Item {
+         if (!candidate) {
+           var f = RootSearch.FALLBACKS.filter(function(x) { return x.id === rowId })[0]
+           if (!f) throw new Error("Unknown command " + rowId)
+-          return RootSearch.aboutFor({ id: f.id, kind: "fallback", title: f.title, typeLabel: "Fallback", url: f.url }, nowMs)
++          return RootSearch.aboutFor({ id: f.id, kind: "fallback", title: RootSearch.t(f.titleKey, f.title), typeLabel: RootSearch.t("type.fallback", "Fallback"), url: f.url }, nowMs)
+         }
+         return RootSearch.aboutFor(candidate, nowMs)
+       },
+@@ -483,12 +503,12 @@ Item {
+         // The calculator row is the query itself, evaluated again.
+         if (data && data.id === RootSearch.CALCULATOR_ID) {
+           var calc = backend.calculate(String(data.query || ""))
+-          if (!calc) throw new Error("Nothing to calculate")
++          if (!calc) throw new Error(RootSearch.t("error.nothing", "Nothing to calculate"))
+           return backend.calculatorAction(String(data.action || "open"), { query: calc.input, result: calc.result, copy: calc.copy, kind: calc.kind }, "")
+         }
+         if (data && String(data.id).indexOf("calculator-history:") === 0) {
+           var entry = backend.historyEntry(data.id)
+-          if (!entry) throw new Error("No such history entry")
++          if (!entry) throw new Error(RootSearch.t("error.noHistory", "No such history entry"))
+           return backend.calculatorAction(String(data.action || "open"), entry, entry.id)
+         }
+         return backend.performAction(data)
+diff --git c/Launcher.qml w/Launcher.qml
+index f14679f..8de75b3 100644
+--- c/Launcher.qml
++++ w/Launcher.qml
+@@ -3,6 +3,7 @@ import Quickshell
+ import Quickshell.Io
+ import Quickshell.Hyprland
+ import qs.Commons
++import qs.Commons as Commons
+ import "ui"
+ 
+ Item {
+@@ -71,8 +72,14 @@ Item {
+     return r
+   }
+ 
++  Commons.Translations {
++    id: strings
++    directory: Qt.resolvedUrl("i18n")
++  }
++
+   Backend {
+     id: backend
++    catalog: strings.strings
+     appLibrary: root.shell ? root.shell.appLibrary : null
+     summon: function(id, payload) { return root.shell ? root.shell.summon(id, payload) : false }
+   }
+@@ -81,6 +88,7 @@ Item {
+     id: launcher
+     shown: root.opened
+     backend: backend
++    strings: strings
+     appLibrary: backend.appLibrary
+     onDismissRequested: root.hide()
+   }
+diff --git c/core/Calculator.js w/core/Calculator.js
+index 2c94892..527e55c 100644
+--- c/core/Calculator.js
++++ w/core/Calculator.js
+@@ -1208,32 +1208,71 @@ function unitLabel(unit, n) {
+ 
+ function titleCase(s) { return s.replace(/(^|\s)([a-z])/g, function(_, a, b) { return a + b.toUpperCase() }) }
+ 
++var catalog = null
++
++function setCatalog(next) {
++  if (!next) { catalog = null; return }
++  try {
++    catalog = JSON.parse(JSON.stringify(next))
++  } catch (e) {
++    var copy = {}
++    for (var key in next) copy[key] = next[key]
++    catalog = copy
++  }
++}
++
++function tr(key, fallback) {
++  var value = catalog && catalog[key]
++  if (value && typeof value === "object") value = value.other
++  if (typeof value === "string" && value.length > 0) return value
++  return fallback
++}
++
++function tf(key, fallback) {
++  var template = tr(key, fallback)
++  for (var i = 2; i < arguments.length; i++) template = template.split("%" + (i - 1)).join(String(arguments[i]))
++  return template
++}
++
++function japanese() { return tr("date.style", "en") === "ja" }
++
++function formatDay(d, utc) {
++  var weekdayIndex = utc ? d.getUTCDay() : d.getDay()
++  var date = utc ? d.getUTCDate() : d.getDate()
++  var month = utc ? d.getUTCMonth() : d.getMonth()
++  var year = utc ? d.getUTCFullYear() : d.getFullYear()
++  var weekday = tr("date.weekday." + weekdayIndex, WEEKDAY_NAMES[weekdayIndex])
++  if (japanese()) return year + "年" + (month + 1) + "月" + date + "日（" + weekday + "）"
++  return WEEKDAY_NAMES[weekdayIndex] + ", " + date + " " + MONTH_NAMES[month] + (utc ? "" : " " + year)
++}
++
+ // { display, copy, caption } for a value.
+ function present(v, state) {
+   if (v.type === "date") {
+     var d = new Date(v.ms)
+-    var text = WEEKDAY_NAMES[d.getDay()] + ", " + d.getDate() + " " + MONTH_NAMES[d.getMonth()] + " " + d.getFullYear()
+-    if (v.hasTime) text += " at " + clock(d.getHours(), d.getMinutes())
++    var text = formatDay(d, false)
++    if (v.hasTime) text += (japanese() ? " " : " at ") + clock(d.getHours(), d.getMinutes())
+     return { display: text, copy: text, caption: relativeDays(v.ms) }
+   }
+   if (v.unix) {
+     var stamp = String(v.n)
+-    return { display: stamp, copy: stamp, caption: "Unix Timestamp" }
++    return { display: stamp, copy: stamp, caption: tr("calc.unix", "Unix Timestamp") }
+   }
+   if (v.base === "sci") {
+     var e = v.n.toExponential().replace("e+", "e")
+-    return { display: e, copy: e, caption: "Scientific Notation" }
++    return { display: e, copy: e, caption: tr("calc.scientific", "Scientific Notation") }
+   }
+   if (v.base) {
+     if (Math.floor(v.n) !== v.n || Math.abs(v.n) > Number.MAX_SAFE_INTEGER) throw new CalcError("not an integer")
+     var prefix = { 16: "0x", 2: "0b", 8: "0o", 10: "" }[v.base]
+     var digits = Math.abs(v.n).toString(v.base).toUpperCase()
+     var out = (v.n < 0 ? "-" : "") + prefix + digits
+-    return { display: out, copy: out, caption: { 16: "Hexadecimal", 2: "Binary", 8: "Octal", 10: "Decimal" }[v.base] }
++    var baseCaption = { 16: "Hexadecimal", 2: "Binary", 8: "Octal", 10: "Decimal" }[v.base]
++    return { display: out, copy: out, caption: tr("calc.base." + v.base, baseCaption) }
+   }
+   if (v.pct) {
+     var p = trimNumber(v.n * 100)
+-    return { display: group(p) + "%", copy: p + "%", caption: "Percent" }
++    return { display: group(p) + "%", copy: p + "%", caption: tr("calc.percent", "Percent") }
+   }
+   if (v.unit && v.unit.currency) {
+     var c = CURRENCIES[v.unit.currency]
+@@ -1259,15 +1298,17 @@ function currencyName(code) {
+ function clock(h, m) {
+   var mm = (m < 10 ? "0" : "") + m
+   if (ENV && ENV.hour12 === false) return (h < 10 ? "0" : "") + h + ":" + mm
+-  return ((h % 12) || 12) + ":" + mm + " " + (h < 12 ? "AM" : "PM")
++  var suffix = h < 12 ? "AM" : "PM"
++  if (japanese()) suffix = h < 12 ? "午前" : "午後"
++  return ((h % 12) || 12) + ":" + mm + " " + suffix
+ }
+ 
+ function relativeDays(ms) {
+   var days = Math.round((startOfDay(ms) - today()) / 864e5)
+-  if (days === 0) return "Today"
+-  if (days === 1) return "Tomorrow"
+-  if (days === -1) return "Yesterday"
+-  return days > 0 ? "In " + group(String(days)) + " days" : group(String(-days)) + " days ago"
++  if (days === 0) return tr("time.today", "Today")
++  if (days === 1) return tr("time.tomorrow", "Tomorrow")
++  if (days === -1) return tr("time.yesterday", "Yesterday")
++  return days > 0 ? tf("time.inDays", "In %1 days", group(String(days))) : tf("time.daysAgo", "%1 days ago", group(String(-days)))
+ }
+ 
+ function utcLabel(offset) {
+@@ -1282,19 +1323,21 @@ function presentTime(tz) {
+     var w = new Date(tz.instant + offset * 60000)
+     return {
+       clock: clock(w.getUTCHours(), w.getUTCMinutes()),
+-      day: WEEKDAY_NAMES[w.getUTCDay()] + ", " + w.getUTCDate() + " " + MONTH_NAMES[w.getUTCMonth()],
++      day: formatDay(w, true),
+       dayIndex: Date.UTC(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate())
+     }
+   }
+   var dst = at(tz.toOffset)
+   var src = at(tz.fromOffset)
+   var dayShift = (dst.dayIndex - src.dayIndex) / 864e5
+-  var shift = dayShift > 0 ? " (+" + dayShift + " day)" : (dayShift < 0 ? " (" + dayShift + " day)" : "")
++  var shift = ""
++  if (dayShift > 0) shift = japanese() ? "（+" + dayShift + "日）" : " (+" + dayShift + " day)"
++  else if (dayShift < 0) shift = japanese() ? "（" + dayShift + "日）" : " (" + dayShift + " day)"
+   return {
+     display: dst.clock + shift,
+     copy: dst.clock,
+     caption: dst.day + " · " + tz.toLabel + " (" + utcLabel(tz.toOffset) + ")",
+-    inputCaption: tz.time ? src.day + " · " + tz.fromLabel + " (" + utcLabel(tz.fromOffset) + ")" : "Current Time"
++    inputCaption: tz.time ? src.day + " · " + tz.fromLabel + " (" + utcLabel(tz.fromOffset) + ")" : tr("calc.currentTime", "Current Time")
+   }
+ }
+ 
+@@ -1330,6 +1373,10 @@ function numberWords(n) {
+ 
+ var KIND_CAPTIONS = { math: "Expression", percentage: "Percentage", date: "Date", base: "Number", unix: "Date" }
+ 
++function kindCaption(kind) {
++  return tr("calc.kind." + kind, KIND_CAPTIONS[kind] || "")
++}
++
+ function evaluate(query, env) {
+   var q = String(query || "").trim()
+   if (!q || q.length > 200) return null
+@@ -1350,7 +1397,7 @@ function evaluate(query, env) {
+     if (value.type === "date" && !isFinite(value.ms)) return null
+     var shown = present(value, state)
+     var kind = value.type === "date" ? "date" : state.kind
+-    var inputCaption = state.fromUnix ? "Unix Timestamp" : (KIND_CAPTIONS[kind] || "")
++    var inputCaption = state.fromUnix ? tr("calc.unix", "Unix Timestamp") : kindCaption(kind)
+     if ((kind === "conversion" || kind === "currency") && state.fromUnit) {
+       inputCaption = state.fromUnit.currency
+         ? present(num(1, state.fromUnit), state).caption
+@@ -1395,6 +1442,7 @@ function filterHistory(history, query) {
+ 
+ if (typeof module !== "undefined") {
+   module.exports = {
++    setCatalog: setCatalog,
+     evaluate: evaluate,
+     lex: lex,
+     words: numberWords,
+diff --git c/core/OmarchyMenu.js w/core/OmarchyMenu.js
+index 38d394e..fb74eef 100644
+--- c/core/OmarchyMenu.js
++++ w/core/OmarchyMenu.js
+@@ -204,6 +204,34 @@ function providerItems(menuId, providerName, output) {
+   return rows
+ }
+ 
++// label/title/description from default/i18n/<language>/menu.json. The English
++// label stays searchable as an alias. Missing entries stay English.
++function applyTranslations(items, catalog) {
++  var source = Array.isArray(items) ? items : []
++  var strings = (catalog && typeof catalog === "object") ? catalog : ({})
++  var out = []
++  for (var i = 0; i < source.length; i++) {
++    var entry = source[i]
++    var translated = entry && strings[entry.id]
++    if (!translated || typeof translated !== "object") {
++      out.push(entry)
++      continue
++    }
++    var next = {}
++    for (var k in entry) next[k] = entry[k]
++    if (translated.label && translated.label !== entry.label) {
++      var aliases = Array.isArray(entry.aliases) ? entry.aliases.slice() : []
++      if (entry.label && aliases.indexOf(entry.label) < 0) aliases.push(entry.label)
++      next.aliases = aliases
++      next.label = String(translated.label)
++    }
++    if (translated.title) next.title = String(translated.title)
++    if (translated.description) next.description = String(translated.description)
++    out.push(next)
++  }
++  return out
++}
++
+ function summonAction(action) {
+   var m = /^omarchy-shell shell summon ([A-Za-z0-9._-]+)(?: '([^']*)')?$/.exec(String(action || "").trim())
+   return m ? { id: m[1], payload: m[2] || "{}" } : null
+@@ -213,6 +241,7 @@ if (typeof module !== "undefined") {
+   module.exports = {
+     stripJsonc: stripJsonc,
+     parse: parse,
++    applyTranslations: applyTranslations,
+     buildTree: buildTree,
+     breadcrumb: breadcrumb,
+     depth: depth,
+diff --git c/core/RootSearch.js w/core/RootSearch.js
+index b424a03..3e01f4e 100644
+--- c/core/RootSearch.js
++++ w/core/RootSearch.js
+@@ -1,9 +1,37 @@
+ 
+ var SUGGESTIONS_LIMIT = 6
+ 
++// User-facing copy. Tests leave the catalog empty and keep the English
++// fallbacks; the shell pushes the active language catalog in at runtime.
++var catalog = null
++
++function setCatalog(next) {
++  if (!next) { catalog = null; return }
++  try {
++    catalog = JSON.parse(JSON.stringify(next))
++  } catch (e) {
++    var copy = {}
++    for (var key in next) copy[key] = next[key]
++    catalog = copy
++  }
++}
++
++function t(key, fallback) {
++  var value = catalog && catalog[key]
++  if (value && typeof value === "object") value = value.other
++  if (typeof value === "string" && value.length > 0) return value
++  return fallback
++}
++
++function tf(key, fallback) {
++  var template = t(key, fallback)
++  for (var i = 2; i < arguments.length; i++) template = template.split("%" + (i - 1)).join(String(arguments[i]))
++  return template
++}
++
+ var FALLBACKS = [
+-  { id: "fallback:google", title: "Search Google", icon: "", url: "https://www.google.com/search?q={query}" },
+-  { id: "fallback:duckduckgo", title: "Search DuckDuckGo", icon: "", url: "https://duckduckgo.com/?q={query}" }
++  { id: "fallback:google", titleKey: "fallback.google", title: "Search Google", icon: "", url: "https://www.google.com/search?q={query}" },
++  { id: "fallback:duckduckgo", titleKey: "fallback.ddg", title: "Search DuckDuckGo", icon: "", url: "https://duckduckgo.com/?q={query}" }
+ ]
+ 
+ // Web searches as root commands with an inline argument pill (ref 04 §2.2
+@@ -11,33 +39,39 @@ var FALLBACKS = [
+ function webSearch(fallback, keywords) {
+   return {
+     id: "builtin:" + fallback.id.slice("fallback:".length) + "-search",
++    titleKey: fallback.titleKey,
+     title: fallback.title,
++    subtitleKey: "subtitle.quicklink",
+     subtitle: "Quicklink",
+     glyph: fallback.icon,
+     keywords: keywords,
+-    arguments: [{ name: "query", placeholder: "Query", required: true }],
++    arguments: [{ name: "query", placeholderKey: "arg.query", placeholder: "Query", required: true }],
+     run: { url: fallback.url }
+   }
+ }
+ 
+ var BUILTINS = [
+-  webSearch(FALLBACKS[0], []),
+-  webSearch(FALLBACKS[1], ["ddg"]),
++  webSearch(FALLBACKS[0], ["検索"]),
++  webSearch(FALLBACKS[1], ["ddg", "検索"]),
+   {
+     id: "builtin:omarchy-menu",
++    titleKey: "builtin.menu",
+     title: "Omarchy Menu",
++    subtitleKey: "builtin.menu.subtitle",
+     subtitle: "Open the original Omarchy menu",
+-    keywords: ["menu", "omarchy"],
++    keywords: ["menu", "omarchy", "メニュー"],
+     run: { summon: "omarchy.menu", payload: "{\"menu\":\"root\"}" },
+     rootSearch: { when: "always" }
+   },
+   {
+     id: "builtin:calculator-history",
++    titleKey: "builtin.calcHistory",
+     title: "Calculator History",
++    subtitleKey: "subtitle.calculator",
+     subtitle: "Calculator",
+     glyph: "\uf1da",                     // nf-fa-history
+-    keywords: ["calculator", "calc", "math", "history", "conversions"],
+-    run: { push: { kind: "calculator-history", title: "Calculator History" } },
++    keywords: ["calculator", "calc", "math", "history", "conversions", "計算", "電卓", "履歴"],
++    run: { push: { kind: "calculator-history", titleKey: "builtin.calcHistory", title: "Calculator History" } },
+     rootSearch: { when: "always" }
+   }
+ ]
+@@ -61,7 +95,7 @@ function appCandidate(entry) {
+     subtitle: "",
+     keywords: keywords,
+     bundleId: desktopId,
+-    typeLabel: "Application",
++    typeLabel: t("type.application", "Application"),
+     appId: desktopId,
+     windowKeys: appWindowKeys(entry),
+     iconName: String(entry.icon || ""),
+@@ -129,9 +163,9 @@ function menuCandidate(tree, item, guards, deps) {
+     type: "command",
+     kind: item.kind === "action" ? "omarchy-action" : (item.kind === "link" ? "omarchy-link" : "omarchy-menu"),
+     title: item.label,
+-    subtitle: crumbs.length > 0 ? crumbs.join(" › ") : "Omarchy",
++    subtitle: crumbs.length > 0 ? crumbs.join(" › ") : t("subtitle.omarchy", "Omarchy"),
+     keywords: keywords,
+-    typeLabel: item.kind === "action" ? "Command" : "Menu",
++    typeLabel: item.kind === "action" ? t("type.command", "Command") : t("type.menu", "Menu"),
+     menuId: item.id,
+     action: item.action,
+     target: item.target,
+@@ -149,14 +183,16 @@ function builtinCandidate(def) {
+     id: def.id,
+     type: "command",
+     kind: "builtin",
+-    title: def.title,
+-    subtitle: def.subtitle || "",
++    title: t(def.titleKey, def.title),
++    subtitle: t(def.subtitleKey, def.subtitle || ""),
+     keywords: def.keywords || [],
+-    typeLabel: "Command",
++    typeLabel: t("type.command", "Command"),
+     glyph: def.glyph || "",
+     glyphFont: def.glyph ? "" : "omarchy",
+     run: def.run,
+-    arguments: def.arguments || [],
++    arguments: (def.arguments || []).map(function(a) {
++      return { name: a.name, placeholder: t(a.placeholderKey, a.placeholder), required: !!a.required }
++    }),
+     rootSearch: def.rootSearch || { when: "always" }
+   }
+ }
+@@ -208,8 +244,8 @@ function fallbackRows(query) {
+   return FALLBACKS.map(function(f) {
+     return {
+       candidate: {
+-        id: f.id, type: "command", kind: "fallback", title: f.title, subtitle: f.subtitle || query,
+-        typeLabel: "Fallback", glyph: f.icon, url: f.url, rootSearch: { when: "searching" }
++        id: f.id, type: "command", kind: "fallback", title: t(f.titleKey, f.title), subtitle: f.subtitle || query,
++        typeLabel: t("type.fallback", "Fallback"), glyph: f.icon, url: f.url, rootSearch: { when: "searching" }
+       },
+       record: null
+     }
+@@ -224,7 +260,7 @@ var CALCULATOR_ID = "calculator:result"
+ function calculatorCandidate(calc) {
+   return {
+     id: CALCULATOR_ID, type: "command", kind: "calculator",
+-    title: calc.result, subtitle: calc.input, typeLabel: "Calculator",
++    title: calc.result, subtitle: calc.input, typeLabel: t("subtitle.calculator", "Calculator"),
+     calcKind: calc.kind, calcInput: calc.input, calcResult: calc.result,
+     calcInputCaption: calc.inputCaption || "", calcResultCaption: calc.resultCaption || "",
+     rootSearch: { when: "searching" }
+@@ -242,11 +278,11 @@ function historyCandidate(entry, nowMs) {
+ 
+ function relativeTime(ms, nowMs) {
+   var s = Math.max(0, Math.round((nowMs - ms) / 1000))
+-  if (s < 60) return "Just now"
+-  if (s < 3600) return Math.floor(s / 60) + " min ago"
+-  if (s < 86400) return Math.floor(s / 3600) + " h ago"
++  if (s < 60) return t("time.justNow", "Just now")
++  if (s < 3600) return tf("time.minutesAgo", "%1 min ago", Math.floor(s / 60))
++  if (s < 86400) return tf("time.hoursAgo", "%1 h ago", Math.floor(s / 3600))
+   var d = Math.floor(s / 86400)
+-  return d === 1 ? "Yesterday" : d + " days ago"
++  return d === 1 ? t("time.yesterday", "Yesterday") : tf("time.daysAgo", "%1 days ago", d)
+ }
+ 
+ // Calculator History (ref 04 App. A calculator.history): newest first,
+@@ -258,17 +294,17 @@ function historySections(history, query, nowMs, filter) {
+   var todays = [], older = []
+   for (var i = 0; i < list.length; i++) (list[i].createdAt >= midnight.getTime() ? todays : older).push({ candidate: historyCandidate(list[i], nowMs), record: null })
+   var out = []
+-  if (todays.length) out.push({ id: "history-today", title: "Today", rows: todays })
+-  if (older.length) out.push({ id: "history-older", title: "Earlier", rows: older })
++  if (todays.length) out.push({ id: "history-today", title: t("section.today", "Today"), rows: todays })
++  if (older.length) out.push({ id: "history-older", title: t("section.earlier", "Earlier"), rows: older })
+   return out
+ }
+ 
+ // The root dropdown (Ctrl+P, ref 04 §2.2 toggleFilter). Raycast's root has
+ // no dropdown; this one narrows root search by type. [D]
+ var FILTERS = [
+-  { id: "all", title: "All" },
+-  { id: "applications", title: "Applications" },
+-  { id: "commands", title: "Commands" }
++  { id: "all", titleKey: "filter.all", title: "All" },
++  { id: "applications", titleKey: "filter.applications", title: "Applications" },
++  { id: "commands", titleKey: "filter.commands", title: "Commands" }
+ ]
+ 
+ function passesFilter(candidate, filter) {
+@@ -290,9 +326,9 @@ function rootSections(candidates, query, ctx, deps) {
+     var searchable = decorated.filter(function(c) { return c.rootSearch.when !== "empty" })
+     var results = deps.Ranker.rank(searchable, q, opts)
+     var sections = []
+-    if (ctx.calculation && !filtered) sections.push({ id: "calculator", title: "Calculator", rows: [{ candidate: calculatorCandidate(ctx.calculation), record: null }] })
+-    if (results.length > 0) sections.push({ id: "results", title: "Results", rows: results })
+-    if (!filtered) sections.push({ id: "fallback-commands", title: "Use “" + q + "” with…", rows: fallbackRows(q) })
++    if (ctx.calculation && !filtered) sections.push({ id: "calculator", title: t("section.calculator", "Calculator"), rows: [{ candidate: calculatorCandidate(ctx.calculation), record: null }] })
++    if (results.length > 0) sections.push({ id: "results", title: t("section.results", "Results"), rows: results })
++    if (!filtered) sections.push({ id: "fallback-commands", title: tf("section.fallback", "Use “%1” with…", q), rows: fallbackRows(q) })
+     return sections
+   }
+ 
+@@ -311,10 +347,10 @@ function rootSections(candidates, query, ctx, deps) {
+   var apps = deps.Ranker.rank(rest.filter(function(c) { return c.type === "application" }), "", opts)
+ 
+   var out = []
+-  if (favorites.length) out.push({ id: "favorites", title: "Favorites", rows: favorites.map(function(c) { return { candidate: c, record: null } }) })
+-  if (suggestions.length) out.push({ id: "suggestions", title: "Suggestions", rows: suggestions })
+-  if (commands.length) out.push({ id: "commands", title: "Commands", rows: commands })
+-  if (apps.length) out.push({ id: "apps", title: "Applications", rows: apps })
++  if (favorites.length) out.push({ id: "favorites", title: t("section.favorites", "Favorites"), rows: favorites.map(function(c) { return { candidate: c, record: null } }) })
++  if (suggestions.length) out.push({ id: "suggestions", title: t("section.suggestions", "Suggestions"), rows: suggestions })
++  if (commands.length) out.push({ id: "commands", title: t("section.commands", "Commands"), rows: commands })
++  if (apps.length) out.push({ id: "apps", title: t("section.apps", "Applications"), rows: apps })
+   return out
+ }
+ 
+@@ -331,7 +367,7 @@ function submenuSections(candidates, menuId, query, ctx, deps) {
+   }
+   if (!q) return inside.length ? [{ id: "menu", title: "", rows: inside.map(function(c) { c.subtitle = ""; return { candidate: c, record: null } }) }] : []
+   var ranked = deps.Ranker.rank(inside, q, rankOptions(ctx))
+-  return ranked.length ? [{ id: "results", title: "Results", rows: ranked }] : []
++  return ranked.length ? [{ id: "results", title: t("section.results", "Results"), rows: ranked }] : []
+ }
+ 
+ function actionsFor(candidate) {
+@@ -339,51 +375,51 @@ function actionsFor(candidate) {
+     // ↵ copies, Ctrl ↵ pastes (SPEC §8 Calculator) [O]; delete keys are
+     // the Windows `clear` shortcuts (ref 04 §2.8).
+     var calc = [
+-      { id: "copy-answer", title: "Copy Answer", shortcut: "↵", section: "primary", icon: "" },
+-      { id: "paste-answer", title: "Paste Answer", shortcut: "Ctrl ↵", section: "primary", icon: "" },
+-      { id: "copy-question-answer", title: "Copy Question and Answer", shortcut: "Ctrl Shift C", section: "copy", icon: "" }
++      { id: "copy-answer", title: t("action.copyAnswer", "Copy Answer"), shortcut: "↵", section: "primary", icon: "" },
++      { id: "paste-answer", title: t("action.pasteAnswer", "Paste Answer"), shortcut: "Ctrl ↵", section: "primary", icon: "" },
++      { id: "copy-question-answer", title: t("action.copyBoth", "Copy Question and Answer"), shortcut: "Ctrl Shift C", section: "copy", icon: "" }
+     ]
+     if (candidate.kind === "calculator") {
+-      calc.push({ id: "open-history", title: "Open Calculator History", shortcut: "", section: "configure", icon: "" })
++      calc.push({ id: "open-history", title: t("action.openHistory", "Open Calculator History"), shortcut: "", section: "configure", icon: "" })
+     } else {
+-      calc.push({ id: "delete-entry", title: "Delete Entry", shortcut: "Ctrl D", section: "delete", icon: "" })
+-      calc.push({ id: "delete-all-entries", title: "Delete All Entries", shortcut: "Ctrl Shift D", section: "delete", icon: "" })
++      calc.push({ id: "delete-entry", title: t("action.deleteEntry", "Delete Entry"), shortcut: "Ctrl D", section: "delete", icon: "" })
++      calc.push({ id: "delete-all-entries", title: t("action.deleteAll", "Delete All Entries"), shortcut: "Ctrl Shift D", section: "delete", icon: "" })
+     }
+     return calc
+   }
+   var primary
+   var list = []
+   switch (candidate.kind) {
+-    case "app": primary = { id: "open", title: "Open Application", icon: "" }; break
+-    case "omarchy-action": primary = { id: "open", title: "Run", icon: "" }; break
++    case "app": primary = { id: "open", title: t("action.openApp", "Open Application"), icon: "" }; break
++    case "omarchy-action": primary = { id: "open", title: t("action.run", "Run"), icon: "" }; break
+     case "omarchy-menu":
+-    case "omarchy-link": primary = { id: "open", title: "Open Menu", icon: "" }; break
++    case "omarchy-link": primary = { id: "open", title: t("action.openMenu", "Open Menu"), icon: "" }; break
+     case "fallback": primary = { id: "open", title: candidate.title, icon: "" }; break
+-    default: primary = { id: "open", title: "Open Command", icon: "" }
++    default: primary = { id: "open", title: t("action.openCommand", "Open Command"), icon: "" }
+   }
+   primary.shortcut = "↵"
+   primary.section = "primary"
+   list.push(primary)
+ 
+   if (candidate.kind && candidate.kind.indexOf("omarchy-") === 0)
+-    list.push({ id: "open-in-omarchy-menu", title: "Open in Omarchy Menu", shortcut: "Ctrl ↵", section: "primary", icon: "" })
++    list.push({ id: "open-in-omarchy-menu", title: t("action.openInMenu", "Open in Omarchy Menu"), shortcut: "Ctrl ↵", section: "primary", icon: "" })
+   if (candidate.kind === "fallback") return list
+ 
+-  if (candidate.kind === "app") list.push({ id: "open-new", title: "Open New Window", shortcut: "Shift ↵", section: "primary", icon: "" })
+-  if (candidate.kind === "app") list.push({ id: "copy-id", title: "Copy Desktop ID", shortcut: "Ctrl Shift C", section: "copy", icon: "" })
+-  if (candidate.kind === "omarchy-action") list.push({ id: "copy-command", title: "Copy Command", shortcut: "Ctrl Shift C", section: "copy", icon: "" })
++  if (candidate.kind === "app") list.push({ id: "open-new", title: t("action.openNew", "Open New Window"), shortcut: "Shift ↵", section: "primary", icon: "" })
++  if (candidate.kind === "app") list.push({ id: "copy-id", title: t("action.copyId", "Copy Desktop ID"), shortcut: "Ctrl Shift C", section: "copy", icon: "" })
++  if (candidate.kind === "omarchy-action") list.push({ id: "copy-command", title: t("action.copyCommand", "Copy Command"), shortcut: "Ctrl Shift C", section: "copy", icon: "" })
+ 
+   if (candidate.favoriteOrder === null || candidate.favoriteOrder === undefined) {
+-    list.push({ id: "favorite-add", title: "Add to Favorites", shortcut: "Ctrl Shift F", section: "favorites", icon: "" })
++    list.push({ id: "favorite-add", title: t("action.favAdd", "Add to Favorites"), shortcut: "Ctrl Shift F", section: "favorites", icon: "" })
+   } else {
+-    list.push({ id: "favorite-remove", title: "Remove from Favorites", shortcut: "Ctrl Shift F", section: "favorites", icon: "" })
+-    list.push({ id: "favorite-up", title: "Move Up in Favorites", shortcut: "Ctrl Alt ↑", section: "favorites", icon: "" })
+-    list.push({ id: "favorite-down", title: "Move Down in Favorites", shortcut: "Ctrl Alt ↓", section: "favorites", icon: "" })
++    list.push({ id: "favorite-remove", title: t("action.favRemove", "Remove from Favorites"), shortcut: "Ctrl Shift F", section: "favorites", icon: "" })
++    list.push({ id: "favorite-up", title: t("action.favUp", "Move Up in Favorites"), shortcut: "Ctrl Alt ↑", section: "favorites", icon: "" })
++    list.push({ id: "favorite-down", title: t("action.favDown", "Move Down in Favorites"), shortcut: "Ctrl Alt ↓", section: "favorites", icon: "" })
+   }
+-  list.push({ id: "set-alias", title: candidate.alias ? "Change Alias" : "Set Alias", shortcut: "", section: "configure", icon: "" })
+-  if (candidate.alias) list.push({ id: "remove-alias", title: "Remove Alias", shortcut: "", section: "configure", icon: "" })
+-  if (candidate.frecency > 1) list.push({ id: "reset-ranking", title: "Reset Ranking", shortcut: "", section: "configure", icon: "" })
+-  list.push({ id: "disable", title: "Disable Command", shortcut: "Alt Shift D", section: "delete", icon: "" })
++  list.push({ id: "set-alias", title: candidate.alias ? t("action.changeAlias", "Change Alias") : t("action.setAlias", "Set Alias"), shortcut: "", section: "configure", icon: "" })
++  if (candidate.alias) list.push({ id: "remove-alias", title: t("action.removeAlias", "Remove Alias"), shortcut: "", section: "configure", icon: "" })
++  if (candidate.frecency > 1) list.push({ id: "reset-ranking", title: t("action.resetRanking", "Reset Ranking"), shortcut: "", section: "configure", icon: "" })
++  list.push({ id: "disable", title: t("action.disable", "Disable Command"), shortcut: "Alt Shift D", section: "delete", icon: "" })
+   return list
+ }
+ 
+@@ -426,15 +462,15 @@ function missingArgument(defs, values) {
+ // you sure you want to shut down?", ref 04 §1) [O]. Omarchy's own scripts
+ // don't confirm.
+ var CONFIRMATIONS = {
+-  "omarchy:system.shutdown": { title: "Shut Down", message: "Are you sure you want to shut down?", primary: "Shut Down" },
+-  "omarchy:system.reboot": { title: "Restart", message: "Are you sure you want to restart?", primary: "Restart" },
+-  "omarchy:system.logout": { title: "Log Out", message: "Are you sure you want to log out?", primary: "Log Out" }
++  "omarchy:system.shutdown": { titleKey: "confirm.shutdown.title", title: "Shut Down", messageKey: "confirm.shutdown.message", message: "Are you sure you want to shut down?", primaryKey: "confirm.shutdown.primary", primary: "Shut Down" },
++  "omarchy:system.reboot": { titleKey: "confirm.restart.title", title: "Restart", messageKey: "confirm.restart.message", message: "Are you sure you want to restart?", primaryKey: "confirm.restart.primary", primary: "Restart" },
++  "omarchy:system.logout": { titleKey: "confirm.logout.title", title: "Log Out", messageKey: "confirm.logout.message", message: "Are you sure you want to log out?", primaryKey: "confirm.logout.primary", primary: "Log Out" }
+ }
+ 
+ function confirmationFor(id, action) {
+   var c = action === "open" ? CONFIRMATIONS[id] : null
+-  if (action === "delete-all-entries") c = { title: "Delete All Entries", message: "This removes every calculation from Calculator History.", primary: "Delete All" }
+-  return c ? { title: c.title, message: c.message, primary: c.primary, destructive: true } : null
++  if (action === "delete-all-entries") c = { titleKey: "confirm.deleteAll.title", title: "Delete All Entries", messageKey: "confirm.deleteAll.message", message: "This removes every calculation from Calculator History.", primaryKey: "confirm.deleteAll.primary", primary: "Delete All" }
++  return c ? { title: t(c.titleKey, c.title), message: t(c.messageKey, c.message), primary: t(c.primaryKey, c.primary), destructive: true } : null
+ }
+ 
+ // The About panel (Ctrl+Shift+K, ref 04 §2.5 toggleAboutPanel): what a row
+@@ -445,36 +481,39 @@ function aboutFor(c, nowMs) {
+     if (value !== undefined && value !== null && String(value) !== "") rows.push({ label: label, value: String(value) })
+   }
+   if (c.kind === "calculator") {
+-    add("Question", c.calcInput)
+-    add("Answer", c.calcResult)
+-    add("Type", c.calcResultCaption)
++    add(t("about.question", "Question"), c.calcInput)
++    add(t("about.answer", "Answer"), c.calcResult)
++    add(t("about.type", "Type"), c.calcResultCaption)
+     return rows
+   }
+   if (c.kind === "calculator-history") {
+-    add("Question", c.subtitle)
+-    add("Answer", c.title)
+-    add("Saved", c.typeLabel)
++    add(t("about.question", "Question"), c.subtitle)
++    add(t("about.answer", "Answer"), c.title)
++    add(t("about.saved", "Saved"), c.typeLabel)
+     return rows
+   }
+-  add("Title", c.title)
+-  add("Type", c.typeLabel)
+-  if (c.kind !== "fallback") add("Location", c.subtitle)
+-  add("ID", c.id)
+-  if (c.kind === "app") add("Desktop Entry", c.appId + ".desktop")
+-  if (c.kind === "omarchy-action") add("Command", c.action)
+-  if (c.kind === "omarchy-link") add("Opens", c.target)
+-  add("URL", c.url || (c.run && c.run.url))
+-  add("Arguments", (c.arguments || []).map(function(a) { return a.name + (a.required ? "" : " (optional)") }).join(", "))
+-  add("Keywords", (c.keywords || []).join(", "))
+-  add("Alias", c.alias)
+-  if (typeof c.favoriteOrder === "number") add("Favorite", "#" + (c.favoriteOrder + 1))
+-  if (c.openedAt) add("Last Opened", relativeTime(c.openedAt, nowMs))
+-  if (c.frecency > 1) add("Frecency", Math.round(c.frecency * 10) / 10)
++  add(t("about.title", "Title"), c.title)
++  add(t("about.type", "Type"), c.typeLabel)
++  if (c.kind !== "fallback") add(t("about.location", "Location"), c.subtitle)
++  add(t("about.id", "ID"), c.id)
++  if (c.kind === "app") add(t("about.desktop", "Desktop Entry"), c.appId + ".desktop")
++  if (c.kind === "omarchy-action") add(t("about.command", "Command"), c.action)
++  if (c.kind === "omarchy-link") add(t("about.opens", "Opens"), c.target)
++  add(t("about.url", "URL"), c.url || (c.run && c.run.url))
++  add(t("about.arguments", "Arguments"), (c.arguments || []).map(function(a) { return a.name + (a.required ? "" : t("arg.optional", " (optional)")) }).join(", "))
++  add(t("about.keywords", "Keywords"), (c.keywords || []).join(", "))
++  add(t("about.alias", "Alias"), c.alias)
++  if (typeof c.favoriteOrder === "number") add(t("about.favorite", "Favorite"), "#" + (c.favoriteOrder + 1))
++  if (c.openedAt) add(t("about.lastOpened", "Last Opened"), relativeTime(c.openedAt, nowMs))
++  if (c.frecency > 1) add(t("about.frecency", "Frecency"), Math.round(c.frecency * 10) / 10)
+   return rows
+ }
+ 
+ if (typeof module !== "undefined") {
+   module.exports = {
++    setCatalog: setCatalog,
++    t: t,
++    tf: tf,
+     SUGGESTIONS_LIMIT: SUGGESTIONS_LIMIT,
+     FALLBACKS: FALLBACKS,
+     BUILTINS: BUILTINS,
+diff --git c/i18n/en.json w/i18n/en.json
+new file mode 100644
+index 0000000..f0ee8c2
+--- /dev/null
++++ w/i18n/en.json
+@@ -0,0 +1,140 @@
++{
++  "date.style": "en",
++  "search.placeholder": "Search for apps and commands…",
++  "search.alias": "Type an alias, then press ↵",
++  "search.menu": "Search %1…",
++  "search.calculations": "Search calculations…",
++  "search.actions": "Search for actions…",
++  "filter.placeholder": "Filter…",
++  "toast.search": "Search toast actions…",
++  "empty.noResults": "No results",
++  "empty.loading": "Loading…",
++  "empty.noCalculations": "No Calculations Yet",
++  "empty.aliasHint": "Typing the alias exactly in the root search puts this command on top. Leave it empty to remove it.",
++  "empty.calcHint": "Type a calculation in the root search, then copy or paste the answer.",
++  "footer.actions": "Actions",
++  "footer.saveAlias": "Save Alias",
++  "alert.cancel": "Cancel",
++  "alert.ok": "OK",
++  "arg.optional": " (optional)",
++  "arg.query": "Query",
++  "copy.error": "Copy Error Message",
++  "toast.copied": "Copied to Clipboard",
++  "toast.aliasSaved": "Alias saved",
++  "toast.aliasRemoved": "Alias removed",
++  "toast.entryDeleted": "Entry deleted",
++  "toast.historyCleared": "History cleared",
++  "toast.menuMissing": "Menu %1 not found",
++  "toast.favAdd": "Added to Favorites",
++  "toast.favRemove": "Removed from Favorites",
++  "toast.favUp": "Moved Up",
++  "toast.favDown": "Moved Down",
++  "toast.rankingReset": "Ranking reset",
++  "toast.disabled": "%1 disabled",
++  "toast.undo": "Undo",
++  "toast.enabled": "%1 enabled",
++  "toast.already": "%1 is already set up",
++  "alias.for": "Alias for %1",
++  "error.needArg": "Type a %1 first",
++  "error.aliasSpaces": "An alias cannot contain spaces",
++  "error.aliasUsed": "Alias “%1” is already used by %2",
++  "error.nothing": "Nothing to calculate",
++  "error.noHistory": "No such history entry",
++  "fallback.google": "Search Google",
++  "fallback.ddg": "Search DuckDuckGo",
++  "subtitle.quicklink": "Quicklink",
++  "builtin.menu": "Omarchy Menu",
++  "builtin.menu.subtitle": "Open the original Omarchy menu",
++  "builtin.calcHistory": "Calculator History",
++  "subtitle.calculator": "Calculator",
++  "subtitle.omarchy": "Omarchy",
++  "type.application": "Application",
++  "type.command": "Command",
++  "type.menu": "Menu",
++  "type.fallback": "Fallback",
++  "time.justNow": "Just now",
++  "time.minutesAgo": "%1 min ago",
++  "time.hoursAgo": "%1 h ago",
++  "time.today": "Today",
++  "time.tomorrow": "Tomorrow",
++  "time.yesterday": "Yesterday",
++  "time.daysAgo": "%1 days ago",
++  "time.inDays": "In %1 days",
++  "section.today": "Today",
++  "section.earlier": "Earlier",
++  "filter.all": "All",
++  "filter.applications": "Applications",
++  "filter.commands": "Commands",
++  "section.calculator": "Calculator",
++  "section.results": "Results",
++  "section.fallback": "Use “%1” with…",
++  "section.favorites": "Favorites",
++  "section.suggestions": "Suggestions",
++  "section.commands": "Commands",
++  "section.apps": "Applications",
++  "action.copyAnswer": "Copy Answer",
++  "action.pasteAnswer": "Paste Answer",
++  "action.copyBoth": "Copy Question and Answer",
++  "action.openHistory": "Open Calculator History",
++  "action.deleteEntry": "Delete Entry",
++  "action.deleteAll": "Delete All Entries",
++  "action.openApp": "Open Application",
++  "action.run": "Run",
++  "action.openMenu": "Open Menu",
++  "action.openCommand": "Open Command",
++  "action.openInMenu": "Open in Omarchy Menu",
++  "action.openNew": "Open New Window",
++  "action.copyId": "Copy Desktop ID",
++  "action.copyCommand": "Copy Command",
++  "action.favAdd": "Add to Favorites",
++  "action.favRemove": "Remove from Favorites",
++  "action.favUp": "Move Up in Favorites",
++  "action.favDown": "Move Down in Favorites",
++  "action.changeAlias": "Change Alias",
++  "action.setAlias": "Set Alias",
++  "action.removeAlias": "Remove Alias",
++  "action.resetRanking": "Reset Ranking",
++  "action.disable": "Disable Command",
++  "confirm.shutdown.title": "Shut Down",
++  "confirm.shutdown.message": "Are you sure you want to shut down?",
++  "confirm.shutdown.primary": "Shut Down",
++  "confirm.restart.title": "Restart",
++  "confirm.restart.message": "Are you sure you want to restart?",
++  "confirm.restart.primary": "Restart",
++  "confirm.logout.title": "Log Out",
++  "confirm.logout.message": "Are you sure you want to log out?",
++  "confirm.logout.primary": "Log Out",
++  "confirm.deleteAll.title": "Delete All Entries",
++  "confirm.deleteAll.message": "This removes every calculation from Calculator History.",
++  "confirm.deleteAll.primary": "Delete All",
++  "about.question": "Question",
++  "about.answer": "Answer",
++  "about.type": "Type",
++  "about.saved": "Saved",
++  "about.title": "Title",
++  "about.location": "Location",
++  "about.id": "ID",
++  "about.desktop": "Desktop Entry",
++  "about.command": "Command",
++  "about.opens": "Opens",
++  "about.url": "URL",
++  "about.arguments": "Arguments",
++  "about.keywords": "Keywords",
++  "about.alias": "Alias",
++  "about.favorite": "Favorite",
++  "about.lastOpened": "Last Opened",
++  "about.frecency": "Frecency",
++  "calc.unix": "Unix Timestamp",
++  "calc.scientific": "Scientific Notation",
++  "calc.base.16": "Hexadecimal",
++  "calc.base.2": "Binary",
++  "calc.base.8": "Octal",
++  "calc.base.10": "Decimal",
++  "calc.percent": "Percent",
++  "calc.currentTime": "Current Time",
++  "calc.kind.math": "Expression",
++  "calc.kind.percentage": "Percentage",
++  "calc.kind.date": "Date",
++  "calc.kind.base": "Number",
++  "calc.kind.unix": "Date"
++}
+diff --git c/i18n/ja.json w/i18n/ja.json
+new file mode 100644
+index 0000000..7c6c8d8
+--- /dev/null
++++ w/i18n/ja.json
+@@ -0,0 +1,143 @@
++{
++  "date.style": "ja",
++  "date.weekday.0": "日曜日",
++  "date.weekday.1": "月曜日",
++  "date.weekday.2": "火曜日",
++  "date.weekday.3": "水曜日",
++  "date.weekday.4": "木曜日",
++  "date.weekday.5": "金曜日",
++  "date.weekday.6": "土曜日",
++  "search.placeholder": "アプリとコマンドを検索…",
++  "search.alias": "エイリアスを入力して ↵",
++  "search.menu": "%1 を検索…",
++  "search.calculations": "計算を検索…",
++  "search.actions": "アクションを検索…",
++  "filter.placeholder": "絞り込み…",
++  "toast.search": "通知の操作を検索…",
++  "empty.noResults": "結果なし",
++  "empty.loading": "読み込み中…",
++  "empty.noCalculations": "計算履歴はまだありません",
++  "empty.aliasHint": "ルート検索でこのエイリアスをそのまま入力すると、このコマンドが先頭になります。空にするとエイリアスを外します。",
++  "empty.calcHint": "ルート検索に計算式を入力して、答えをコピーまたは貼り付けできます。",
++  "footer.actions": "アクション",
++  "footer.saveAlias": "エイリアスを保存",
++  "alert.cancel": "キャンセル",
++  "arg.optional": "（任意）",
++  "arg.query": "検索語",
++  "copy.error": "エラーメッセージをコピー",
++  "toast.copied": "クリップボードにコピーしました",
++  "toast.aliasSaved": "エイリアスを保存しました",
++  "toast.aliasRemoved": "エイリアスを削除しました",
++  "toast.entryDeleted": "項目を削除しました",
++  "toast.historyCleared": "履歴を消去しました",
++  "toast.menuMissing": "メニュー「%1」が見つかりません",
++  "toast.favAdd": "お気に入りに追加しました",
++  "toast.favRemove": "お気に入りから外しました",
++  "toast.favUp": "上へ移動しました",
++  "toast.favDown": "下へ移動しました",
++  "toast.rankingReset": "ランキングをリセットしました",
++  "toast.disabled": "%1 を無効にしました",
++  "toast.undo": "元に戻す",
++  "toast.enabled": "%1 を有効にしました",
++  "toast.already": "%1 はすでに設定されています",
++  "alias.for": "%1 のエイリアス",
++  "error.needArg": "先に%1を入力してください",
++  "error.aliasSpaces": "エイリアスに空白は使えません",
++  "error.aliasUsed": "エイリアス「%1」はすでに %2 で使われています",
++  "error.nothing": "計算できる式がありません",
++  "error.noHistory": "その履歴はありません",
++  "fallback.google": "Google で検索",
++  "fallback.ddg": "DuckDuckGo で検索",
++  "subtitle.quicklink": "クイックリンク",
++  "builtin.menu": "Omarchy メニュー",
++  "builtin.menu.subtitle": "従来の Omarchy メニューを開く",
++  "builtin.calcHistory": "計算履歴",
++  "subtitle.calculator": "電卓",
++  "type.application": "アプリ",
++  "type.command": "コマンド",
++  "type.menu": "メニュー",
++  "type.fallback": "ウェブ検索",
++  "time.justNow": "たった今",
++  "time.minutesAgo": "%1分前",
++  "time.hoursAgo": "%1時間前",
++  "time.today": "今日",
++  "time.tomorrow": "明日",
++  "time.yesterday": "昨日",
++  "time.daysAgo": "%1日前",
++  "time.inDays": "%1日後",
++  "section.today": "今日",
++  "section.earlier": "それ以前",
++  "filter.all": "すべて",
++  "filter.applications": "アプリ",
++  "filter.commands": "コマンド",
++  "section.calculator": "電卓",
++  "section.results": "結果",
++  "section.fallback": "「%1」で検索…",
++  "section.favorites": "お気に入り",
++  "section.suggestions": "候補",
++  "section.commands": "コマンド",
++  "section.apps": "アプリ",
++  "action.copyAnswer": "答えをコピー",
++  "action.pasteAnswer": "答えを貼り付け",
++  "action.copyBoth": "式と答えをコピー",
++  "action.openHistory": "計算履歴を開く",
++  "action.deleteEntry": "項目を削除",
++  "action.deleteAll": "すべての項目を削除",
++  "action.openApp": "アプリを開く",
++  "action.run": "実行",
++  "action.openMenu": "メニューを開く",
++  "action.openCommand": "コマンドを開く",
++  "action.openInMenu": "Omarchy メニューで開く",
++  "action.openNew": "新しいウィンドウで開く",
++  "action.copyId": "デスクトップ ID をコピー",
++  "action.copyCommand": "コマンドをコピー",
++  "action.favAdd": "お気に入りに追加",
++  "action.favRemove": "お気に入りから外す",
++  "action.favUp": "お気に入りで上へ",
++  "action.favDown": "お気に入りで下へ",
++  "action.changeAlias": "エイリアスを変更",
++  "action.setAlias": "エイリアスを設定",
++  "action.removeAlias": "エイリアスを削除",
++  "action.resetRanking": "ランキングをリセット",
++  "action.disable": "コマンドを無効にする",
++  "confirm.shutdown.title": "シャットダウン",
++  "confirm.shutdown.message": "シャットダウンしますか？",
++  "confirm.shutdown.primary": "シャットダウン",
++  "confirm.restart.title": "再起動",
++  "confirm.restart.message": "再起動しますか？",
++  "confirm.restart.primary": "再起動",
++  "confirm.logout.title": "ログアウト",
++  "confirm.logout.message": "ログアウトしますか？",
++  "confirm.logout.primary": "ログアウト",
++  "confirm.deleteAll.title": "すべての項目を削除",
++  "confirm.deleteAll.message": "計算履歴の計算をすべて削除します。",
++  "confirm.deleteAll.primary": "すべて削除",
++  "about.question": "式",
++  "about.answer": "答え",
++  "about.type": "種類",
++  "about.saved": "保存日時",
++  "about.title": "タイトル",
++  "about.location": "場所",
++  "about.desktop": "デスクトップファイル",
++  "about.command": "コマンド",
++  "about.opens": "開く先",
++  "about.arguments": "引数",
++  "about.keywords": "キーワード",
++  "about.alias": "エイリアス",
++  "about.favorite": "お気に入り",
++  "about.lastOpened": "最後に開いたとき",
++  "about.frecency": "使用頻度",
++  "calc.unix": "UNIX 時刻",
++  "calc.scientific": "指数表記",
++  "calc.base.16": "16進数",
++  "calc.base.2": "2進数",
++  "calc.base.8": "8進数",
++  "calc.base.10": "10進数",
++  "calc.percent": "パーセント",
++  "calc.currentTime": "現在時刻",
++  "calc.kind.math": "式",
++  "calc.kind.percentage": "割合",
++  "calc.kind.date": "日付",
++  "calc.kind.base": "数値",
++  "calc.kind.unix": "日付"
++}
+diff --git c/services/OmarchyMenuSource.qml w/services/OmarchyMenuSource.qml
+index b2653f1..5b436fb 100644
+--- c/services/OmarchyMenuSource.qml
++++ w/services/OmarchyMenuSource.qml
+@@ -1,6 +1,7 @@
+ import QtQuick
+ import Quickshell
+ import Quickshell.Io
++import qs.Commons as Commons
+ import "../core/OmarchyMenu.js" as OmarchyMenu
+ 
+ Item {
+@@ -10,8 +11,15 @@ Item {
+   readonly property string defaultPath: source.omarchyPath + "/default/omarchy/omarchy-menu.jsonc"
+   readonly property string userPath: Quickshell.env("HOME") + "/.config/omarchy/extensions/omarchy-menu.jsonc"
+ 
++  property var englishDefaults: []
+   property var defaultItems: []
+   property var userItems: []
++  property var menuCatalog: ({})
++  readonly property string menuCatalogPath: {
++    var code = String(Commons.I18n.language || "en")
++    if (!/^[a-z]{2,3}(-[A-Za-z0-9]+)?$/.test(code) || code === "en") return ""
++    return source.omarchyPath + "/default/i18n/" + code + "/menu.json"
++  }
+   property var tree: OmarchyMenu.buildTree([], [])
+   property var guards: ({ when: {}, checked: {}, disabled: {} })
+   property var providerItems: ({})
+@@ -150,11 +158,26 @@ Item {
+     providerProc.running = true
+   }
+ 
++  function parseCatalog(raw) {
++    try {
++      var parsed = JSON.parse(raw || "{}")
++      return (parsed && typeof parsed === "object" && !Array.isArray(parsed)) ? parsed : ({})
++    } catch (e) {
++      return ({})
++    }
++  }
++
++  function applyMenuLanguage() {
++    source.defaultItems = OmarchyMenu.applyTranslations(source.englishDefaults, source.menuCatalog)
++    source.rebuild()
++  }
++
+   function load(which, text) {
+     var parsed = OmarchyMenu.parse(text)
+     if (parsed.error) source.message("warning", "ignoring unreadable " + (which === "user" ? source.userPath : source.defaultPath) + ": " + parsed.error, null)
+     if (which === "user") source.userItems = parsed.items
+-    else source.defaultItems = parsed.items
++    else source.englishDefaults = parsed.items
++    source.defaultItems = OmarchyMenu.applyTranslations(source.englishDefaults, source.menuCatalog)
+     source.rebuild()
+   }
+ 
+@@ -186,6 +209,16 @@ Item {
+     }
+   }
+ 
++  FileView {
++    path: source.menuCatalogPath
++    watchChanges: true
++    printErrors: false
++    onLoaded: {
++      source.menuCatalog = source.parseCatalog(text())
++      if (source.englishDefaults.length) source.applyMenuLanguage()
++    }
++  }
++
+   FileView {
+     path: source.defaultPath
+     watchChanges: true
+diff --git c/ui/ActionPanel.qml w/ui/ActionPanel.qml
+index 880161f..afa241e 100644
+--- c/ui/ActionPanel.qml
++++ w/ui/ActionPanel.qml
+@@ -37,7 +37,7 @@ Rectangle {
+ 
+   width: px(340)
+   height: Math.min(px(360), list.contentHeight + searchRow.height + px(16))
+-  radius: Math.max(Style.cornerRadius, px(8))
++  radius: Style.cornerRadius
+   color: look.background
+   border.width: 1
+   border.color: Util.alpha(look.foreground, 0.15)
+@@ -77,7 +77,7 @@ Rectangle {
+         anchors.right: parent.right
+         anchors.bottom: parent.bottom
+         height: panel.px(34)
+-        radius: Math.max(Style.cornerRadius, panel.px(6))
++        radius: Style.cornerRadius
+         color: index === panel.selectedIndex ? panel.look.selectedBackground : "transparent"
+ 
+         Text {
+diff --git c/ui/Alert.qml w/ui/Alert.qml
+index e545258..1477c65 100644
+--- c/ui/Alert.qml
++++ w/ui/Alert.qml
+@@ -7,6 +7,8 @@ Rectangle {
+   id: alert
+ 
+   property var spec: null
++  property string cancelLabel: "Cancel"
++  property string okLabel: "OK"
+   property var look: null
+   property real zoom: 1
+ 
+@@ -26,7 +28,7 @@ Rectangle {
+     anchors.centerIn: parent
+     width: alert.px(320)
+     height: column.implicitHeight + alert.px(36)
+-    radius: Math.max(Style.cornerRadius, alert.px(10))
++    radius: Style.cornerRadius
+     color: alert.look.background
+     border.width: 1
+     border.color: Util.alpha(alert.look.foreground, 0.18)
+@@ -74,8 +76,8 @@ Rectangle {
+ 
+         Repeater {
+           model: [
+-            { primary: false, title: "Cancel", key: "Esc" },
+-            { primary: true, title: alert.spec ? alert.spec.primary : "OK", key: "↵" }
++            { primary: false, title: alert.cancelLabel, key: "Esc" },
++            { primary: true, title: alert.spec ? alert.spec.primary : alert.okLabel, key: "↵" }
+           ]
+ 
+           Rectangle {
+@@ -83,7 +85,7 @@ Rectangle {
+             readonly property bool danger: modelData.primary && alert.spec && alert.spec.destructive
+             width: (column.width - alert.px(10)) / 2
+             height: alert.px(34)
+-            radius: Math.max(Style.cornerRadius, alert.px(6))
++            radius: Style.cornerRadius
+             color: danger ? Util.alpha(alert.danger, 0.85)
+               : modelData.primary ? alert.look.selectedBackground
+               : Util.alpha(alert.look.foreground, 0.08)
+diff --git c/ui/InfoPanel.qml w/ui/InfoPanel.qml
+index b8daf06..9d0040b 100644
+--- c/ui/InfoPanel.qml
++++ w/ui/InfoPanel.qml
+@@ -15,7 +15,7 @@ Rectangle {
+ 
+   width: px(400)
+   height: content.implicitHeight + px(24)
+-  radius: Math.max(Style.cornerRadius, px(8))
++  radius: Style.cornerRadius
+   color: look.background
+   border.width: 1
+   border.color: Util.alpha(look.foreground, 0.15)
+diff --git c/ui/KeyHint.qml w/ui/KeyHint.qml
+index 0dca37f..90e7265 100644
+--- c/ui/KeyHint.qml
++++ w/ui/KeyHint.qml
+@@ -19,7 +19,7 @@ Row {
+       required property string modelData
+       height: label.implicitHeight + Math.round(Style.space(4) * hint.zoom)
+       width: Math.max(height, label.implicitWidth + Math.round(Style.space(10) * hint.zoom))
+-      radius: Math.round(Style.space(4) * hint.zoom)
++      radius: Math.min(Style.cornerRadius, height / 2)
+       color: Util.alpha(hint.color, 0.1)
+ 
+       Text {
+diff --git c/ui/LauncherWindow.qml w/ui/LauncherWindow.qml
+index 618a8ad..187bb7c 100644
+--- c/ui/LauncherWindow.qml
++++ w/ui/LauncherWindow.qml
+@@ -13,7 +13,19 @@ PanelWindow {
+   id: window
+ 
+   required property var backend
++  property var strings: null
+   property var appLibrary: null
++
++  function tr(key, fallback) {
++    if (!window.strings) return fallback !== undefined ? fallback : key
++    var catalog = window.strings.strings
++    return catalog ? window.strings.t(key, fallback) : (fallback !== undefined ? fallback : key)
++  }
++
++  function filterTitle(id) {
++    var match = RootSearch.FILTERS.filter(function(item) { return item.id === id })[0] || RootSearch.FILTERS[0]
++    return window.tr(match.titleKey, match.title)
++  }
+   property bool shown: false
+   readonly property bool busy: window.shown && window.backend.loading
+   readonly property int loadingFeedbackDelay: 500
+@@ -95,10 +107,10 @@ PanelWindow {
+ 
+   readonly property bool atRoot: window.stack.length === 1
+   readonly property bool compact: window.general.windowMode === "compact" && window.atRoot && !window.query
+-  readonly property string placeholder: window.view.kind === "alias" ? "Type an alias, then press ↵"
+-    : window.view.kind === "menu" ? "Search " + window.view.title + "…"
+-    : window.view.kind === "calculator-history" ? "Search calculations…"
+-    : "Search for apps and commands…"
++  readonly property string placeholder: window.view.kind === "alias" ? window.tr("search.alias", "Type an alias, then press ↵")
++    : window.view.kind === "menu" ? window.tr("search.menu", "Search %1…").arg(window.view.title)
++    : window.view.kind === "calculator-history" ? window.tr("search.calculations", "Search calculations…")
++    : window.tr("search.placeholder", "Search for apps and commands…")
+ 
+   readonly property int cardWidth: Math.min(px(750), width - Style.gapsOut * 2)
+   readonly property int fullHeight: Math.min(px(475), height - Style.gapsOut * 2)
+@@ -398,7 +410,7 @@ PanelWindow {
+     if (!action) return
+     if (action.copy !== undefined) {
+       window.backend.copyText(action.copy)
+-      window.showToast("success", "Copied to Clipboard")
++      window.showToast("success", window.tr("toast.copied", "Copied to Clipboard"))
+       return
+     }
+     var r = window.backend.callSync(action.call.method, action.call.data)
+@@ -435,7 +447,7 @@ PanelWindow {
+     if (!r.ok) { window.showToast("failure", r.error); return }
+     var saved = window.query.trim()
+     window.pop()
+-    window.showToast("success", saved ? "Alias saved" : "Alias removed")
++    window.showToast("success", saved ? window.tr("toast.aliasSaved", "Alias saved") : window.tr("toast.aliasRemoved", "Alias removed"))
+     window.rebuild(false)
+   }
+ 
+@@ -443,7 +455,7 @@ PanelWindow {
+   // A failure toast always offers its message to copy (Ctrl+T).
+   function showToast(style, title, actions) {
+     var list = (actions || []).slice()
+-    if (style === "failure") list.push({ id: "copy-error", title: "Copy Error Message", copy: String(title || "") })
++    if (style === "failure") list.push({ id: "copy-error", title: window.tr("copy.error", "Copy Error Message"), copy: String(title || "") })
+     window.toastPanelOpen = false
+     window.toast = { style: style, title: String(title || ""), actions: list }
+     toastTimer.interval = list.length ? 6000 : 2500
+@@ -664,7 +676,7 @@ PanelWindow {
+     id: card
+     width: window.cardWidth
+     height: window.compact ? window.headerHeight + card.borderTop + card.borderBottom : window.fullHeight
+-    radius: Math.max(Style.cornerRadius, window.px(8))
++    radius: Style.cornerRadius
+     anchors.horizontalCenter: parent.horizontalCenter
+     y: Math.max(Style.gapsOut, Math.min(Math.round(window.height / 4), window.height - window.fullHeight - Style.gapsOut))
+     color: window.look.background
+@@ -771,7 +783,7 @@ PanelWindow {
+             readonly property bool focused: window.argFocus === index
+             height: window.px(28)
+             width: Math.min(window.px(220), pillText.implicitWidth + window.px(20))
+-            radius: Math.max(Style.cornerRadius, window.px(6))
++            radius: Style.cornerRadius
+             color: Util.alpha(window.look.foreground, pill.focused ? 0.12 : 0.06)
+             border.width: 1
+             border.color: pill.focused ? window.look.accent : Util.alpha(window.look.foreground, 0.15)
+@@ -784,7 +796,7 @@ PanelWindow {
+               anchors.rightMargin: window.px(10)
+               anchors.verticalCenter: parent.verticalCenter
+               textFormat: Text.PlainText
+-              text: pill.value || (pill.modelData.placeholder + (pill.modelData.required ? "" : " (optional)"))
++              text: pill.value || (pill.modelData.placeholder + (pill.modelData.required ? "" : window.tr("arg.optional", " (optional)")))
+               opacity: pill.value ? 1 : 0.5
+               color: window.look.foreground
+               elide: Text.ElideLeft
+@@ -818,7 +830,7 @@ PanelWindow {
+         anchors.verticalCenter: parent.verticalCenter
+         height: window.px(28)
+         width: filterRow.implicitWidth + window.px(20)
+-        radius: Math.max(Style.cornerRadius, window.px(6))
++        radius: Style.cornerRadius
+         color: Util.alpha(window.look.foreground, window.dropdownOpen ? 0.12 : 0.06)
+         border.width: 1
+         border.color: Util.alpha(window.look.foreground, 0.12)
+@@ -831,7 +843,7 @@ PanelWindow {
+           Text {
+             anchors.verticalCenter: parent.verticalCenter
+             textFormat: Text.PlainText
+-            text: (RootSearch.FILTERS.filter(function(f) { return f.id === window.rootFilter })[0] || RootSearch.FILTERS[0]).title
++            text: window.filterTitle(window.rootFilter)
+             color: window.look.foreground
+             opacity: window.rootFilter === "all" ? 0.7 : 1
+             font.family: window.look.fontFamily
+@@ -914,8 +926,8 @@ PanelWindow {
+           anchors.horizontalCenter: parent.horizontalCenter
+           textFormat: Text.PlainText
+           text: window.view.kind === "alias" ? window.view.title
+-            : window.view.kind === "calculator-history" && !window.query ? "No Calculations Yet"
+-            : (window.backend.ready ? "No results" : "Loading…")
++            : window.view.kind === "calculator-history" && !window.query ? window.tr("empty.noCalculations", "No Calculations Yet")
++            : (window.backend.ready ? window.tr("empty.noResults", "No results") : window.tr("empty.loading", "Loading…"))
+           color: window.look.foreground
+           font.family: window.look.fontFamily
+           font.pixelSize: Math.round(Style.font.title * window.zoom)
+@@ -923,8 +935,8 @@ PanelWindow {
+         Text {
+           anchors.horizontalCenter: parent.horizontalCenter
+           textFormat: Text.PlainText
+-          text: window.view.kind === "alias" ? "Typing the alias exactly in the root search puts this command on top. Leave it empty to remove it."
+-            : window.view.kind === "calculator-history" && !window.query ? "Type a calculation in the root search, then copy or paste the answer." : ""
++          text: window.view.kind === "alias" ? window.tr("empty.aliasHint", "Typing the alias exactly in the root search puts this command on top. Leave it empty to remove it.")
++            : window.view.kind === "calculator-history" && !window.query ? window.tr("empty.calcHint", "Type a calculation in the root search, then copy or paste the answer.") : ""
+           visible: text.length > 0
+           color: window.look.foreground
+           opacity: 0.55
+@@ -972,7 +984,7 @@ PanelWindow {
+           id: footerStatus
+           anchors.verticalCenter: parent.verticalCenter
+           textFormat: Text.PlainText
+-          text: window.toast ? window.toast.title : window.loadingVisible ? "Loading…" : window.view.title
++          text: window.toast ? window.toast.title : window.loadingVisible ? (window.strings ? window.strings.t("empty.loading", "Loading…") : "Loading…") : window.view.title
+           color: window.look.foreground
+           opacity: window.toast ? 0.9 : 0.6
+           elide: Text.ElideRight
+@@ -999,7 +1011,7 @@ PanelWindow {
+         readonly property var primary: {
+           window.selectedRow
+           window.backend.storeRevision
+-          if (window.view.kind === "alias") return { title: "Save Alias", shortcut: "↵" }
++          if (window.view.kind === "alias") return { title: window.tr("footer.saveAlias", "Save Alias"), shortcut: "↵" }
+           var list = window.actionsForSelected()
+           return list.length ? list[0] : null
+         }
+@@ -1031,7 +1043,7 @@ PanelWindow {
+           visible: window.view.kind !== "alias"
+           anchors.verticalCenter: parent.verticalCenter
+           textFormat: Text.PlainText
+-          text: "Actions"
++          text: window.tr("footer.actions", "Actions")
+           color: window.look.foreground
+           opacity: 0.7
+           font.family: window.look.fontFamily
+@@ -1056,6 +1068,7 @@ PanelWindow {
+       anchors.bottom: footer.top
+       anchors.bottomMargin: window.px(6)
+       sourceComponent: ActionPanel {
++        placeholder: window.tr("search.actions", "Search for actions…")
+         actions: window.actions
+         look: window.look
+         zoom: window.zoom
+@@ -1073,9 +1086,9 @@ PanelWindow {
+       anchors.top: header.bottom
+       anchors.topMargin: window.px(4)
+       sourceComponent: ActionPanel {
+-        placeholder: "Filter…"
++        placeholder: window.tr("filter.placeholder", "Filter…")
+         actions: RootSearch.FILTERS.map(function(f) {
+-          return { id: f.id, title: f.title, shortcut: "", section: "filter", icon: f.id === window.rootFilter ? "✓" : " " }
++          return { id: f.id, title: window.tr(f.titleKey, f.title), shortcut: "", section: "filter", icon: f.id === window.rootFilter ? "✓" : " " }
+         })
+         look: window.look
+         zoom: window.zoom
+@@ -1093,7 +1106,7 @@ PanelWindow {
+       anchors.bottom: footer.top
+       anchors.bottomMargin: window.px(6)
+       sourceComponent: ActionPanel {
+-        placeholder: "Search toast actions…"
++        placeholder: window.tr("toast.search", "Search toast actions…")
+         actions: (window.toast ? window.toast.actions : []).map(function(a) {
+           return { id: a.id, title: a.title, shortcut: "", section: "toast", icon: " " }
+         })
+@@ -1124,6 +1137,8 @@ PanelWindow {
+       anchors.fill: parent
+       sourceComponent: Alert {
+         spec: window.alert ? window.alert.spec : null
++        cancelLabel: window.tr("alert.cancel", "Cancel")
++        okLabel: window.tr("alert.ok", "OK")
+         look: window.look
+         zoom: window.zoom
+         onConfirmed: window.confirmAlert()
+diff --git c/ui/ResultRow.qml w/ui/ResultRow.qml
+index ab5a1ec..074f5bc 100644
+--- c/ui/ResultRow.qml
++++ w/ui/ResultRow.qml
+@@ -45,7 +45,7 @@ Item {
+     anchors.fill: parent
+     sourceComponent: Rectangle {
+       anchors.fill: parent
+-      radius: Math.max(Style.cornerRadius, row.px(6))
++      radius: Style.cornerRadius
+       color: row.selected ? row.look.selectedBackground : Util.alpha(row.look.foreground, 0.04)
+       border.width: 1
+       border.color: Util.alpha(row.look.foreground, row.selected ? 0 : 0.08)
+@@ -144,7 +144,7 @@ Item {
+   Rectangle {
+     visible: !row.isSection && !row.isCalculator
+     anchors.fill: parent
+-    radius: Math.max(Style.cornerRadius, row.px(6))
++    radius: Style.cornerRadius
+     color: row.selected ? row.look.selectedBackground : "transparent"
+     opacity: row.disabled ? 0.45 : 1
+ 
+@@ -189,7 +189,7 @@ Item {
+         anchors.verticalCenter: parent.verticalCenter
+         height: aliasText.implicitHeight + row.px(4)
+         width: aliasText.implicitWidth + row.px(12)
+-        radius: row.px(4)
++        radius: Style.cornerRadius
+         color: "transparent"
+         border.width: 1
+         border.color: Util.alpha(row.look.foreground, 0.3)

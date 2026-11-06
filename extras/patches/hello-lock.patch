@@ -1,0 +1,30 @@
+diff --git c/Service.qml w/Service.qml
+index f073f1b..1fd0918 100644
+--- c/Service.qml
++++ w/Service.qml
+@@ -1009,7 +1009,9 @@ Item {
+ 
+   Process {
+     id: blankProcess
+-    command: ["bash", "-c", "omarchy-brightness-keyboard off; omarchy-brightness-display off"]
++    // Keyboard only. Turning the panel off here is what blanks the lock
++    // screen a few seconds after resume; the monitor stays lit.
++    command: ["bash", "-c", "omarchy-brightness-keyboard off"]
+   }
+ 
+   Timer {
+@@ -1018,11 +1020,10 @@ Item {
+     repeat: false
+     property double armedAt: 0
+     onTriggered: {
+-      // A countdown frozen by suspend fires right after resume, which would
+-      // blank the freshly woken unlock screen under the user. Wall-clock time
+-      // exposes the gap: take a fresh run-up instead of blanking.
++      // A countdown frozen by suspend fires right after resume. Bring the
++      // panel back and leave it on so the lock screen stays visible.
+       if (Date.now() - armedAt > interval + 2000) {
+-        root.armBlankTimer()
++        root.runWake()
+         return
+       }
+       // Only a password check in flight should hold the display up. The

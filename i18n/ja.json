@@ -1,0 +1,20 @@
+{
+  "hidden.tooltip": "非公開ネットワークを追加",
+  "hidden.title": "非公開ネットワーク",
+  "hidden.hint": "名前を放送しないWi-Fiに接続します。今の接続は切り替わります。",
+  "hidden.ssid": "ネットワーク名",
+  "hidden.security": "セキュリティ",
+  "hidden.password": "パスワード",
+  "hidden.wpa": "WPA/WPA2",
+  "hidden.wpa3": "WPA3",
+  "hidden.open": "なし",
+  "hidden.connect": "接続",
+  "hidden.connecting": "接続しています…",
+  "hidden.connected": "保存して接続しました",
+  "hidden.failed": "接続できませんでした",
+  "hidden.needSsid": "ネットワーク名を入力してください",
+  "hidden.ssidTooLong": "ネットワーク名が長すぎます",
+  "hidden.needPassword": "パスワードを入力してください",
+  "hidden.passwordLength": "パスワードは8〜63文字です",
+  "hidden.noDevice": "Wi-Fiデバイスがありません"
+}

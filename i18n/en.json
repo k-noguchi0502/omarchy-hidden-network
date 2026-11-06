@@ -1,0 +1,20 @@
+{
+  "hidden.tooltip": "Add a hidden network",
+  "hidden.title": "Hidden network",
+  "hidden.hint": "Connect to a Wi-Fi network that does not broadcast its name. This switches the current connection.",
+  "hidden.ssid": "Network name",
+  "hidden.security": "Security",
+  "hidden.password": "Password",
+  "hidden.wpa": "WPA/WPA2",
+  "hidden.wpa3": "WPA3",
+  "hidden.open": "None",
+  "hidden.connect": "Connect",
+  "hidden.connecting": "Connecting…",
+  "hidden.connected": "Saved and connected",
+  "hidden.failed": "Could not connect",
+  "hidden.needSsid": "Enter the network name",
+  "hidden.ssidTooLong": "Network name is too long",
+  "hidden.needPassword": "Enter the password",
+  "hidden.passwordLength": "Password must be 8–63 characters",
+  "hidden.noDevice": "No Wi-Fi device"
+}

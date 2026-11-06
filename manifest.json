@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "knoguchi.hidden-network",
+  "name": "非公開ネットワーク",
+  "version": "1.0.0",
+  "author": "k-noguchi0502",
+  "description": "SSIDを放送しないWi-Fiを追加して接続します。",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "非公開ネットワーク",
+    "description": "SSIDを放送しないWi-Fiを追加して接続します。",
+    "category": "Network",
+    "allowMultiple": false,
+    "defaultSection": "tray"
+  }
+}

@@ -1,0 +1,120 @@
+diff --git c/Overview.qml w/Overview.qml
+index c8eeb40..706df4b 100644
+--- c/Overview.qml
++++ w/Overview.qml
+@@ -178,12 +178,45 @@ Item {
+   }
+ 
+   function focusedIndex() {
+-    var focused = Hyprland.focusedWorkspace
++    var mon = Hyprland.focusedMonitor
++    var focused = (mon && mon.activeWorkspace) || Hyprland.focusedWorkspace
++    var id = focused ? focused.id : -1
+     for (var j = 0; j < workspaceList.length; j++)
+-      if (focused && workspaceList[j].id === focused.id) return j
++      if (workspaceList[j].id === id) return j
+     return 0
+   }
+ 
++  // The workspace on screen is the selection until the user moves it. A card
++  // sliding under a pointer that has not moved is not a choice.
++  property bool selectionTouched: false
++  property bool pointerMoved: false
++  property point pointerAnchor: Qt.point(-1, -1)
++
++  function armSelection() {
++    root.selectionTouched = false
++    root.pointerMoved = false
++    root.pointerAnchor = Qt.point(-1, -1)
++    root.refreshList()
++    var i = root.focusedIndex()
++    root.anchorIndex = i
++    root.selectedIndex = i
++  }
++
++  function pointerChose(index, scenePoint) {
++    if (!root.pointerMoved) {
++      if (root.pointerAnchor.x < 0) {
++        root.pointerAnchor = scenePoint
++        return
++      }
++      var dx = scenePoint.x - root.pointerAnchor.x
++      var dy = scenePoint.y - root.pointerAnchor.y
++      if (Math.abs(dx) + Math.abs(dy) < Style.space(4)) return
++      root.pointerMoved = true
++    }
++    root.selectionTouched = true
++    root.selectedIndex = index
++  }
++
+   // Window thumbnails take a few frames to arrive. Until the current
+   // workspace's are in, the overlay stays hidden: the real desktop underneath
+   // looks the same, so nothing flashes.
+@@ -224,9 +257,7 @@ Item {
+     root.targetScreen = root.focusedScreen()
+     Hyprland.refreshWorkspaces()
+     Hyprland.refreshToplevels()
+-    root.refreshList()
+-    root.anchorIndex = root.focusedIndex()
+-    root.selectedIndex = root.anchorIndex
++    root.armSelection()
+     root.warm = true
+     wallpaperResolve.running = true
+     // Re-take the still: drop the source, then set it on the next turn.
+@@ -238,6 +269,7 @@ Item {
+ 
+   function prepareOpen() {
+     if (!root.warm) root.warmUp()
++    else root.armSelection()
+     closeAnim.stop()
+     root.closing = false
+     root.progress = 0
+@@ -395,10 +427,12 @@ Item {
+ 
+   function move(delta) {
+     if (workspaceList.length === 0) return
++    root.selectionTouched = true
+     selectedIndex = (selectedIndex + delta + workspaceList.length) % workspaceList.length
+   }
+ 
+   function moveRow(delta) {
++    root.selectionTouched = true
+     var next = selectedIndex + delta * columns
+     if (next >= 0 && next < workspaceList.length) selectedIndex = next
+   }
+@@ -434,7 +468,16 @@ Item {
+ 
+   Connections {
+     target: Hyprland.workspaces
+-    function onValuesChanged() { if (root.opened && !root.closing) root.refreshList() }
++    function onValuesChanged() {
++      if (!root.opened || root.closing) return
++      root.refreshList()
++      if (root.selectionTouched) return
++      var i = root.focusedIndex()
++      root.selectedIndex = i
++      // The zoom has not started yet, so the card that fills the screen can
++      // still become the one on show.
++      if (root.progress === 0 && !openAnim.running) root.anchorIndex = i
++    }
+   }
+ 
+   onOpenedChanged: if (opened) Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+@@ -665,7 +708,7 @@ Item {
+                     anchors.fill: parent
+                     hoverEnabled: true
+                     cursorShape: Qt.PointingHandCursor
+-                    onContainsMouseChanged: if (containsMouse) root.selectedIndex = card.index
++                    onPositionChanged: function(mouse) { root.pointerChose(card.index, mapToItem(null, mouse.x, mouse.y)) }
+                     onClicked: root.focusWindow(win.modelData.address, card.ws)
+                   }
+                 }
+@@ -689,7 +732,7 @@ Item {
+               z: -1
+               hoverEnabled: true
+               cursorShape: Qt.PointingHandCursor
+-              onContainsMouseChanged: if (containsMouse) root.selectedIndex = card.index
++              onPositionChanged: function(mouse) { root.pointerChose(card.index, mapToItem(null, mouse.x, mouse.y)) }
+               onClicked: root.goToWorkspace(card.ws)
+             }
+           }

@@ -1,0 +1,17 @@
+diff --git c/Panel.qml w/Panel.qml
+index 5a2dab5..e21fafa 100644
+--- c/Panel.qml
++++ w/Panel.qml
+@@ -45,9 +45,9 @@ Panel {
+   property var lastPendingAction: null
+ 
+   readonly property var topActions: [
+-    { icon: "󰐥", label: "Shutdown", command: "omarchy-system-shutdown", destructive: true, confirm: true },
+-    { icon: "󰜉", label: "Reboot", command: "omarchy-system-reboot", confirm: true },
+-    { icon: "󰍃", label: "Logout", command: "omarchy-system-logout", confirm: true }
++    { icon: "󰐥", label: "Shutdown", command: "omarchy-system shutdown", destructive: true, confirm: true },
++    { icon: "󰜉", label: "Reboot", command: "omarchy-system reboot", confirm: true },
++    { icon: "󰍃", label: "Logout", command: "omarchy-system logout", confirm: true }
+   ]
+   readonly property var lockAction: { "icon": "󰌾", "label": "Lock", "command": "omarchy-system-lock" }
+ 
